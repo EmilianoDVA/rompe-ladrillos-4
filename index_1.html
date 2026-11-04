@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rompeladrillos</title>
+
+<!-- ============ CSS: la piel del juego (colores, tamaños, posiciones) ============ -->
+<style>
+  :root { --fondo:#14213d; --marco:#fca311; --texto:#e5e5e5; }
+  body {
+    margin:0; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:12px;
+    background:var(--fondo); color:var(--texto);
+    font-family: Georgia, "Times New Roman", serif;
+  }
+  h1 { margin:0; font-size:2rem; letter-spacing:1px; }
+  #info { font-size:1.1rem; display:flex; gap:28px; }
+  canvas { background:#0b132b; border:4px solid var(--marco); border-radius:6px; max-width:96vw; }
+  p { margin:0; opacity:.8; }
+  #zonaSonido { display:flex; align-items:center; gap:12px; }
+  #probar {
+    font-family:inherit; font-size:1rem; padding:8px 14px; cursor:pointer;
+    background:var(--marco); color:#14213d; border:none; border-radius:6px; font-weight:bold;
+  }
+</style>
+</head>
+
+<body>
+<!-- ============ HTML: el esqueleto (qué hay en la página) ============ -->
+<h1>Rompeladrillos</h1>
+<div id="info">
+  <span>Puntos: <b id="puntos">0</b></span>
+  <span>Vidas: <b id="vidas">3</b></span>
+</div>
+<canvas id="juego" width="640" height="440"></canvas>
+<p>Mueve la barra con ← → o con el mouse. Espacio para iniciar o pausar.</p>
+<div id="zonaSonido">
+  <button id="probar">🔊 Probar sonidos</button>
+  <span id="audioEstado">Cada clic suena un sonido distinto</span>
+</div>
+
+<!-- ============ JAVASCRIPT: el cerebro (qué hace el juego) ============ -->
+<script>
+// 1) PREPARAR EL LIENZO: "canvas" es una hoja en blanco donde dibujamos.
+const lienzo = document.getElementById("juego");
+const pincel = lienzo.getContext("2d");
+
+// 2) VARIABLES: cajitas con nombre donde guardamos datos que cambian.
+let puntos = 0;
+let vidas = 3;
+let nivel = 1;
+let estado = "esperando";   // "esperando", "jugando" o "terminado"
+
+// 3) OBJETOS: agrupan datos de una misma cosa (el niño que brinca, la barra).
+const pelota = { x:320, y:380, radio:13, dx:4, dy:-4 };   // dx/dy = velocidad horizontal/vertical
+const barra  = { ancho:200, alto:12, x:270, y:410, velocidad:7 };
+
+// 4) LADRILLOS REDONDOS: una cuadrícula de 5 filas x 9 columnas de círculos.
+const filas = 5, columnas = 9;
+const radioLadrillo = 24;
+const colores = ["#e63946","#f77f00","#fca311","#8ecae6","#06d6a0"];
+let ladrillos = [];
+
+function crearLadrillos() {
+  ladrillos = [];
+  for (let f = 0; f < filas; f++) {
+    for (let c = 0; c < columnas; c++) {
+      ladrillos.push({
+        x: 48 + c * 68,       // centro del círculo (horizontal)
+        y: 40 + f * 54,       // centro del círculo (vertical)
+        color: colores[f],
+        vivo: true
+      });
+    }
+  }
+}
+
+// 5) FONDO DE COLORES: una lista de colores que se mezclan poco a poco.
+//    Cada color es [rojo, verde, azul]. Orden: rojo, morado, azul, turquesa, verde, amarillo, naranja.
+const fondoColores = [
+  [170,30,40], [110,40,160], [40,70,180], [30,150,170],
+  [40,150,80], [180,160,40], [190,100,30]
+];
+let faseFondo = 0;   // en qué punto del recorrido de colores vamos
+
+function colorFondo() {
+  const total = fondoColores.length;
+  const i = Math.floor(faseFondo) % total;       // color actual
+  const j = (i + 1) % total;                     // color siguiente
+  const t = faseFondo - Math.floor(faseFondo);   // cuánto llevamos de la mezcla (0 a 1)
+  const mezcla = fondoColores[i].map((v, k) => Math.round(v + (fondoColores[j][k] - v) * t));
+  return `rgb(${mezcla[0]},${mezcla[1]},${mezcla[2]})`;
+}
+
+// 6) SONIDOS: todos se crean con código, no necesitan archivos de audio.
+let audio = null;
+
+function activarAudio() {
+  // El navegador solo deja sonar el audio después de que la persona toca algo.
+  if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (audio.state === "suspended") audio.resume();
+}
+
+// 6a) CLINK DE CRISTAL: tres notas sonando juntas que se apagan poco a poco.
+function sonidoClink() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const notas = [ [1400, 0.5], [3250, 0.3], [5950, 0.15] ];   // [frecuencia, fuerza]
+  notas.forEach(([frecuencia, fuerza]) => {
+    const osc = audio.createOscillator();
+    const volumen = audio.createGain();
+    osc.type = "sine";
+    osc.frequency.value = frecuencia;
+    volumen.gain.setValueAtTime(fuerza, t);
+    volumen.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+    osc.connect(volumen);
+    volumen.connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + 0.7);
+  });
+}
+
+// 6b) TRAMPOLÍN: un "boing" cuya nota sube rápido y luego baja y rebota como resorte.
+function sonidoTrampolin() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const osc = audio.createOscillator();
+  const volumen = audio.createGain();
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(160, t);
+  osc.frequency.exponentialRampToValueAtTime(620, t + 0.07);   // sube de golpe
+  osc.frequency.exponentialRampToValueAtTime(230, t + 0.20);   // baja
+  osc.frequency.exponentialRampToValueAtTime(430, t + 0.30);   // rebota
+  osc.frequency.exponentialRampToValueAtTime(270, t + 0.45);   // se calma
+  volumen.gain.setValueAtTime(0.6, t);
+  volumen.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  osc.connect(volumen);
+  volumen.connect(audio.destination);
+  osc.start(t);
+  osc.stop(t + 0.5);
+}
+
+// 6c) PERDISTE: el "¡aaah!" de una multitud decepcionada. Varias voces graves que bajan de tono.
+function sonidoPerdiste() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const master = audio.createGain();
+  master.gain.setValueAtTime(0.0001, t);
+  master.gain.exponentialRampToValueAtTime(0.4, t + 0.1);
+  master.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+
+  const filtro = audio.createBiquadFilter();   // le da forma de "vocal" al sonido
+  filtro.type = "bandpass";
+  filtro.Q.value = 1.2;
+  filtro.frequency.setValueAtTime(950, t);
+  filtro.frequency.exponentialRampToValueAtTime(480, t + 1.3);
+
+  const vibrato = audio.createOscillator();    // pequeño temblor de la voz
+  const fuerzaVibrato = audio.createGain();
+  vibrato.frequency.value = 6;
+  fuerzaVibrato.gain.value = 7;
+  vibrato.connect(fuerzaVibrato);
+  vibrato.start(t);
+  vibrato.stop(t + 1.5);
+
+  [0, 14, -18, 30].forEach((desafine) => {     // cuatro "personas" ligeramente distintas
+    const voz = audio.createOscillator();
+    voz.type = "sawtooth";
+    voz.detune.value = desafine;
+    voz.frequency.setValueAtTime(340, t);
+    voz.frequency.exponentialRampToValueAtTime(140, t + 1.3);
+    fuerzaVibrato.connect(voz.frequency);
+    voz.connect(filtro);
+    voz.start(t);
+    voz.stop(t + 1.5);
+  });
+
+  filtro.connect(master);
+  master.connect(audio.destination);
+}
+
+// Botón de prueba: cada clic suena un sonido distinto, sin necesidad de jugar.
+const pruebas = [
+  ["clink de cristal", sonidoClink],
+  ["trampolín", sonidoTrampolin],
+  ["perdiste", sonidoPerdiste]
+];
+let turnoPrueba = 0;
+const botonProbar = document.getElementById("probar");
+const textoAudio = document.getElementById("audioEstado");
+botonProbar.addEventListener("click", async () => {
+  try {
+    activarAudio();
+    await audio.resume();
+    const [nombre, sonido] = pruebas[turnoPrueba];
+    sonido();
+    textoAudio.textContent = "Sonó: " + nombre + " (audio " + audio.state + ")";
+    turnoPrueba = (turnoPrueba + 1) % pruebas.length;
+  } catch (error) {
+    textoAudio.textContent = "Error de audio: " + error.message;
+  }
+  botonProbar.blur();   // así la barra espaciadora no vuelve a presionar este botón
+});
+
+// 7) CONTROLES: el juego "escucha" el teclado y el mouse.
+const teclas = {};
+document.addEventListener("keydown", (e) => {
+  teclas[e.key] = true;
+  if (e.key === " ") { e.preventDefault(); botonEspacio(); }
+});
+document.addEventListener("keyup", (e) => { teclas[e.key] = false; });
+lienzo.addEventListener("mousemove", (e) => {
+  const caja = lienzo.getBoundingClientRect();
+  const escala = lienzo.width / caja.width;
+  barra.x = (e.clientX - caja.left) * escala - barra.ancho / 2;
+});
+lienzo.addEventListener("click", botonEspacio);
+
+function botonEspacio() {
+  activarAudio();
+  if (estado === "esperando") estado = "jugando";
+  else if (estado === "jugando") estado = "esperando";   // pausa
+  else if (estado === "terminado") reiniciar();
+}
+
+// 8) REGLAS DEL JUEGO
+function reiniciar() {
+  puntos = 0; vidas = 3; nivel = 1;
+  document.getElementById("puntos").textContent = puntos;
+  document.getElementById("vidas").textContent = vidas;
+  crearLadrillos(); colocarPelota(); estado = "esperando";
+}
+
+function colocarPelota() {
+  pelota.x = barra.x + barra.ancho / 2;
+  pelota.y = barra.y - pelota.radio - 2;
+  const rapidez = 4 + (nivel - 1) * 0.6;          // cada nivel es más rápido
+  pelota.dx = rapidez * (Math.random() < 0.5 ? -1 : 1);
+  pelota.dy = -rapidez;
+}
+
+// 9) ACTUALIZAR: se ejecuta ~60 veces por segundo y mueve todo.
+function actualizar() {
+  if (teclas["ArrowLeft"])  barra.x -= barra.velocidad;
+  if (teclas["ArrowRight"]) barra.x += barra.velocidad;
+  barra.x = Math.max(0, Math.min(lienzo.width - barra.ancho, barra.x));
+
+  if (estado !== "jugando") {
+    if (estado === "esperando") { pelota.x = barra.x + barra.ancho / 2; pelota.y = barra.y - pelota.radio - 2; }
+    return;
+  }
+
+  faseFondo += 0.004;   // el fondo cambia de color solo mientras se juega
+
+  pelota.x += pelota.dx;
+  pelota.y += pelota.dy;
+
+  if (pelota.x < pelota.radio || pelota.x > lienzo.width - pelota.radio) pelota.dx *= -1;
+  if (pelota.y < pelota.radio) pelota.dy *= -1;
+
+  const tocaBarra = pelota.y + pelota.radio >= barra.y &&
+                    pelota.y - pelota.radio <= barra.y + barra.alto &&
+                    pelota.x >= barra.x && pelota.x <= barra.x + barra.ancho &&
+                    pelota.dy > 0;
+  if (tocaBarra) {
+    const posicion = (pelota.x - (barra.x + barra.ancho / 2)) / (barra.ancho / 2);
+    const rapidez = Math.hypot(pelota.dx, pelota.dy);
+    pelota.dx = posicion * rapidez * 0.8;
+    pelota.dy = -Math.sqrt(rapidez * rapidez - pelota.dx * pelota.dx);
+    sonidoTrampolin();   // ¡boing!
+  }
+
+  // Choque con ladrillos redondos: si la distancia entre centros es menor
+  // que la suma de los dos radios, se tocan.
+  for (const l of ladrillos) {
+    if (!l.vivo) continue;
+    const difX = pelota.x - l.x;
+    const difY = pelota.y - l.y;
+    if (Math.hypot(difX, difY) < pelota.radio + radioLadrillo) {
+      l.vivo = false;
+      if (Math.abs(difX) > Math.abs(difY)) pelota.dx *= -1;   // golpe de lado
+      else pelota.dy *= -1;                                    // golpe de arriba o abajo
+      puntos += 10;
+      sonidoClink();
+      break;
+    }
+  }
+
+  if (ladrillos.every(l => !l.vivo)) {
+    nivel++; crearLadrillos(); colocarPelota(); estado = "esperando";
+  }
+
+  if (pelota.y > lienzo.height + pelota.radio) {
+    vidas--;
+    if (vidas <= 0) { estado = "terminado"; sonidoPerdiste(); }
+    else { colocarPelota(); estado = "esperando"; }
+  }
+
+  document.getElementById("puntos").textContent = puntos;
+  document.getElementById("vidas").textContent = vidas;
+}
+
+// 10) DIBUJAR AL NIÑO: un muñequito hecho con círculos y rayas.
+//     Cuando sube tiene los brazos arriba y las piernas dobladas; cuando baja abre los brazos.
+function dibujarNino() {
+  const x = pelota.x, y = pelota.y, s = pelota.radio;
+  const subiendo = pelota.dy < 0;
+  pincel.save();
+  pincel.lineCap = "round";
+  pincel.lineJoin = "round";
+
+  // Piernas
+  pincel.strokeStyle = "#2b4c9b";
+  pincel.lineWidth = 4;
+  pincel.beginPath();
+  if (subiendo) {
+    pincel.moveTo(x, y + 0.4 * s); pincel.lineTo(x - 0.5 * s, y + 0.7 * s); pincel.lineTo(x - 0.35 * s, y + s);
+    pincel.moveTo(x, y + 0.4 * s); pincel.lineTo(x + 0.5 * s, y + 0.7 * s); pincel.lineTo(x + 0.35 * s, y + s);
+  } else {
+    pincel.moveTo(x, y + 0.4 * s); pincel.lineTo(x - 0.5 * s, y + s);
+    pincel.moveTo(x, y + 0.4 * s); pincel.lineTo(x + 0.5 * s, y + s);
+  }
+  pincel.stroke();
+
+  // Brazos
+  pincel.strokeStyle = "#ffd3a8";
+  pincel.lineWidth = 3.5;
+  pincel.beginPath();
+  if (subiendo) {
+    pincel.moveTo(x, y - 0.1 * s); pincel.lineTo(x - 0.95 * s, y - 0.95 * s);
+    pincel.moveTo(x, y - 0.1 * s); pincel.lineTo(x + 0.95 * s, y - 0.95 * s);
+  } else {
+    pincel.moveTo(x, y - 0.1 * s); pincel.lineTo(x - 1.05 * s, y - 0.3 * s);
+    pincel.moveTo(x, y - 0.1 * s); pincel.lineTo(x + 1.05 * s, y - 0.3 * s);
+  }
+  pincel.stroke();
+
+  // Cuerpo (camiseta roja)
+  pincel.strokeStyle = "#e63946";
+  pincel.lineWidth = 7;
+  pincel.beginPath();
+  pincel.moveTo(x, y - 0.15 * s);
+  pincel.lineTo(x, y + 0.4 * s);
+  pincel.stroke();
+
+  // Cabeza
+  const cy = y - 0.68 * s, r = 0.45 * s;
+  pincel.fillStyle = "#ffd3a8";
+  pincel.beginPath();
+  pincel.arc(x, cy, r, 0, Math.PI * 2);
+  pincel.fill();
+
+  // Pelo
+  pincel.fillStyle = "#5a3a1e";
+  pincel.beginPath();
+  pincel.arc(x, cy, r, Math.PI, 0);
+  pincel.fill();
+
+  // Ojos y sonrisa
+  pincel.fillStyle = "#222";
+  pincel.beginPath(); pincel.arc(x - 0.16 * s, cy + 0.04 * s, 1.1, 0, Math.PI * 2); pincel.fill();
+  pincel.beginPath(); pincel.arc(x + 0.16 * s, cy + 0.04 * s, 1.1, 0, Math.PI * 2); pincel.fill();
+  pincel.strokeStyle = "#222";
+  pincel.lineWidth = 1.2;
+  pincel.beginPath();
+  pincel.arc(x, cy + 0.12 * s, 0.17 * s, 0.1 * Math.PI, 0.9 * Math.PI);
+  pincel.stroke();
+
+  pincel.restore();
+}
+
+// 11) DIBUJAR: pinta el fondo de color y luego todo lo demás encima.
+function dibujar() {
+  pincel.fillStyle = colorFondo();
+  pincel.fillRect(0, 0, lienzo.width, lienzo.height);
+
+  for (const l of ladrillos) {
+    if (!l.vivo) continue;
+    pincel.beginPath();
+    pincel.arc(l.x, l.y, radioLadrillo, 0, Math.PI * 2);
+    pincel.fillStyle = l.color;
+    pincel.fill();
+    pincel.strokeStyle = "rgba(255,255,255,0.7)";
+    pincel.lineWidth = 2;
+    pincel.stroke();
+  }
+
+  pincel.fillStyle = "#fca311";
+  pincel.fillRect(barra.x, barra.y, barra.ancho, barra.alto);
+
+  dibujarNino();
+
+  pincel.fillStyle = "#ffffff";
+  pincel.font = "bold 24px Georgia";
+  pincel.textAlign = "center";
+  if (estado === "esperando") pincel.fillText(`Nivel ${nivel}: presiona espacio`, lienzo.width / 2, 340);
+
+  if (estado === "terminado") {
+    // Pantalla oscurecida y una X roja grande
+    pincel.fillStyle = "rgba(0,0,0,0.5)";
+    pincel.fillRect(0, 0, lienzo.width, lienzo.height);
+    pincel.strokeStyle = "#ff1e1e";
+    pincel.lineWidth = 18;
+    pincel.lineCap = "round";
+    pincel.beginPath();
+    pincel.moveTo(260, 110); pincel.lineTo(380, 230);
+    pincel.moveTo(380, 110); pincel.lineTo(260, 230);
+    pincel.stroke();
+
+    pincel.fillStyle = "#ffffff";
+    pincel.font = "bold 24px Georgia";
+    pincel.fillText("Fin del juego", lienzo.width / 2, 300);
+    pincel.font = "18px Georgia";
+    pincel.fillText(`Puntos: ${puntos}. Espacio para jugar otra vez`, lienzo.width / 2, 335);
+  }
+}
+
+// 12) BUCLE DEL JUEGO: repite actualizar + dibujar sin parar.
+function bucle() {
+  actualizar();
+  dibujar();
+  requestAnimationFrame(bucle);
+}
+
+crearLadrillos();
+colocarPelota();
+bucle();
+</script>
+</body>
+</html>
