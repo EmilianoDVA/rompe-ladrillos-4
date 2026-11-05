@@ -2,27 +2,35 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Rompeladrillos</title>
 
 <!-- ============ CSS: la piel del juego (colores, tamaños, posiciones) ============ -->
 <style>
   :root { --fondo:#14213d; --marco:#fca311; --texto:#e5e5e5; }
+  html { overscroll-behavior: none; }
   body {
-    margin:0; min-height:100vh; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; gap:12px;
+    margin:0; padding:10px; box-sizing:border-box; min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
     background:var(--fondo); color:var(--texto);
     font-family: Georgia, "Times New Roman", serif;
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+    touch-action: manipulation;
   }
-  h1 { margin:0; font-size:2rem; letter-spacing:1px; }
-  #info { font-size:1.1rem; display:flex; gap:28px; }
-  canvas { background:#0b132b; border:4px solid var(--marco); border-radius:6px; max-width:96vw; }
-  p { margin:0; opacity:.8; }
-  #zonaSonido { display:flex; align-items:center; gap:12px; }
-  #probar {
-    font-family:inherit; font-size:1rem; padding:8px 14px; cursor:pointer;
-    background:var(--marco); color:#14213d; border:none; border-radius:6px; font-weight:bold;
+  h1 { margin:0; font-size:clamp(1.5rem, 6vw, 2rem); letter-spacing:1px; }
+  #info { font-size:clamp(0.95rem, 3.6vw, 1.1rem); display:flex; flex-wrap:wrap; justify-content:center; gap:8px 22px; }
+  canvas {
+    background:#0b132b; border:4px solid var(--marco); border-radius:6px;
+    width:min(calc(96vw - 8px), 632px, calc(113vh - 8px)); height:auto; aspect-ratio:640 / 440;
+    touch-action:none; display:block;
   }
+  p { margin:0; opacity:.8; text-align:center; font-size:clamp(0.85rem, 3.4vw, 1rem); }
+  #zonaSonido { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:10px 12px; }
+  #zonaSonido button {
+    font-family:inherit; font-size:1rem; padding:10px 16px; cursor:pointer;
+    background:var(--marco); color:#14213d; border:none; border-radius:8px; font-weight:bold;
+  }
+  #audioEstado { font-size:0.85rem; opacity:.8; }
 </style>
 </head>
 
@@ -35,8 +43,9 @@
   <span>Vidas: <b id="vidas">3</b></span>
 </div>
 <canvas id="juego" width="640" height="440"></canvas>
-<p>Mueve la barra con ← → o con el mouse. Espacio para iniciar o pausar.</p>
+<p id="ayuda"></p>
 <div id="zonaSonido">
+  <button id="pausa">⏯ Pausar / seguir</button>
   <button id="probar">🔊 Probar sonidos</button>
   <span id="audioEstado">Cada clic suena un sonido distinto</span>
 </div>
@@ -53,6 +62,14 @@ let vidas = 3;
 let nivel = 1;
 let estado = "esperando";   // "esperando", "jugando", "nivelCompleto" o "terminado"
 let cuentaNivel = 0;        // cuenta regresiva de la celebración de nivel
+let bloqueoHasta = 0;       // evita iniciar o reiniciar sin querer al levantar el dedo
+
+// ¿Estamos en un celular o tableta? Entonces cambiamos las instrucciones.
+const esTactil = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+const textoAccion = esTactil ? "toca la pantalla" : "presiona espacio";
+document.getElementById("ayuda").textContent = esTactil
+  ? "Arrastra el dedo sobre el juego para mover la barra. Toca para iniciar."
+  : "Mueve la barra con ← → o con el mouse. Espacio para iniciar o pausar.";
 
 // 3) OBJETOS: agrupan datos de una misma cosa (el niño que brinca, la barra).
 const pelota = { x:320, y:380, radio:13, dx:4, dy:-4 };   // dx/dy = velocidad horizontal/vertical
@@ -107,7 +124,15 @@ let audio = null;
 
 function activarAudio() {
   // El navegador solo deja sonar el audio después de que la persona toca algo.
-  if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audio) {
+    audio = new (window.AudioContext || window.webkitAudioContext)();
+    // Truco para iPhone: un sonido vacío que "destapa" el audio.
+    const vacio = audio.createBuffer(1, 1, 22050);
+    const fuente = audio.createBufferSource();
+    fuente.buffer = vacio;
+    fuente.connect(audio.destination);
+    fuente.start(0);
+  }
   if (audio.state === "suspended") audio.resume();
 }
 
@@ -333,15 +358,36 @@ document.addEventListener("keydown", (e) => {
   if (e.key === " ") { e.preventDefault(); botonEspacio(); }
 });
 document.addEventListener("keyup", (e) => { teclas[e.key] = false; });
-lienzo.addEventListener("mousemove", (e) => {
+
+// Mover la barra: funciona con el mouse y con el dedo (arrastrando sobre el juego).
+function moverBarra(e) {
   const caja = lienzo.getBoundingClientRect();
-  const escala = lienzo.width / caja.width;
-  barra.x = (e.clientX - caja.left) * escala - barra.ancho / 2;
+  const escala = lienzo.width / lienzo.clientWidth;
+  barra.x = (e.clientX - caja.left - lienzo.clientLeft) * escala - barra.ancho / 2;
+}
+lienzo.addEventListener("pointerdown", (e) => {
+  moverBarra(e);
+  if (e.pointerType === "touch") lienzo.setPointerCapture(e.pointerId);
 });
-lienzo.addEventListener("click", botonEspacio);
+lienzo.addEventListener("pointermove", moverBarra);
+lienzo.addEventListener("pointerup", (e) => {
+  if (e.pointerType === "touch") {
+    // Con el dedo: al levantarlo se inicia el nivel o se reinicia la partida (nunca se pausa).
+    if (estado === "esperando" || estado === "terminado") botonEspacio();
+  } else {
+    botonEspacio();   // con el mouse: un clic inicia o pausa, como antes
+  }
+});
+
+// Botón de pausa para el celular.
+document.getElementById("pausa").addEventListener("click", (e) => {
+  botonEspacio();
+  e.currentTarget.blur();
+});
 
 function botonEspacio() {
   activarAudio();
+  if (Date.now() < bloqueoHasta) return;   // pequeña espera tras perder una vida o terminar
   if (estado === "esperando") estado = "jugando";
   else if (estado === "jugando") estado = "esperando";   // pausa
   else if (estado === "terminado") reiniciar();
@@ -390,6 +436,7 @@ function actualizar() {
       crearLadrillos();
       colocarPelota();
       estado = "esperando";
+      bloqueoHasta = Date.now() + 700;
     }
     return;
   }
@@ -455,8 +502,8 @@ function actualizar() {
 
   if (pelota.y > lienzo.height + pelota.radio) {
     vidas--;
-    if (vidas <= 0) { estado = "terminado"; sonidoPerdiste(); }
-    else { colocarPelota(); estado = "esperando"; }
+    if (vidas <= 0) { estado = "terminado"; bloqueoHasta = Date.now() + 1200; sonidoPerdiste(); }
+    else { colocarPelota(); estado = "esperando"; bloqueoHasta = Date.now() + 700; }
   }
 }
 
@@ -556,7 +603,7 @@ function dibujar() {
   if (estado === "esperando") {
     pincel.fillStyle = "#ffffff";
     pincel.font = "bold 24px Georgia";
-    pincel.fillText(`Nivel ${nivel}: presiona espacio`, lienzo.width / 2, 340);
+    pincel.fillText(`Nivel ${nivel}: ${textoAccion}`, lienzo.width / 2, 340);
     if (nivel > 1) {
       pincel.font = "16px Georgia";
       pincel.fillText("¡Más rápido, más filas y círculos más chicos!", lienzo.width / 2, 366);
@@ -592,7 +639,7 @@ function dibujar() {
     pincel.font = "bold 24px Georgia";
     pincel.fillText("Fin del juego", lienzo.width / 2, 300);
     pincel.font = "18px Georgia";
-    pincel.fillText(`Llegaste al nivel ${nivel} con ${puntos} puntos. Espacio para jugar otra vez`, lienzo.width / 2, 335);
+    pincel.fillText(`Llegaste al nivel ${nivel} con ${puntos} puntos. ${esTactil ? "Toca" : "Espacio"} para jugar otra vez`, lienzo.width / 2, 335);
   }
 }
 
