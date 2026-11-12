@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Rompeladrillos</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.93.0"></script>
 
 <!-- ============ CSS: la piel del juego (colores, tamaños, posiciones) ============ -->
 <style>
@@ -31,6 +32,29 @@
     background:var(--marco); color:#14213d; border:none; border-radius:8px; font-weight:bold;
   }
   #audioEstado { font-size:0.85rem; opacity:.8; }
+
+  /* --- Cuentas y ranking --- */
+  input { -webkit-user-select:text; user-select:text; }
+  .oculto { display:none !important; }
+  #cuenta { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 10px; font-size:clamp(0.85rem, 3.4vw, 1rem); }
+  #cuenta button { font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-weight:bold; font-size:0.9rem; padding:7px 12px; background:#2b3a67; color:var(--texto); }
+  #modal { position:fixed; inset:0; background:rgba(5,10,25,.82); display:flex; align-items:center; justify-content:center; padding:14px; z-index:50; }
+  #tarjeta { position:relative; width:min(420px, 100%); max-height:92vh; overflow:auto; background:#1b2a4e; border:3px solid var(--marco); border-radius:12px; padding:22px 20px; box-sizing:border-box; }
+  #tarjeta h2 { margin:0 0 12px; text-align:center; font-size:1.4rem; }
+  #tarjeta button { font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-weight:bold; }
+  #cerrarModal { position:absolute; top:8px; right:10px; background:none; color:var(--texto); font-size:1.3rem; padding:4px 8px; }
+  .pestanas { display:flex; gap:8px; margin-bottom:12px; }
+  .pestanas button { flex:1; padding:9px; background:#2b3a67; color:var(--texto); }
+  .pestanas button.activa { background:var(--marco); color:#14213d; }
+  #tarjeta label { display:block; margin:10px 0 0; font-size:.95rem; }
+  #tarjeta input { display:block; width:100%; box-sizing:border-box; margin-top:4px; padding:11px; font-size:16px; border-radius:8px; border:2px solid #3b4d80; background:#0f1a36; color:var(--texto); font-family:inherit; }
+  #enviarCuenta { width:100%; margin-top:16px; padding:12px; font-size:1.05rem; background:var(--marco); color:#14213d; }
+  #mensajeCuenta, #mensajeRanking { min-height:1.2em; margin:10px 0 0; font-size:.92rem; color:#ffd84d; opacity:1; }
+  .nota { font-size:.8rem; opacity:.75; margin-top:12px; }
+  #tarjeta .enlace { display:block; margin:12px auto 0; background:none; color:var(--texto); text-decoration:underline; font-weight:normal; font-size:.9rem; padding:6px; }
+  #listaRanking { list-style:none; margin:0; padding:0; }
+  #listaRanking li { display:flex; justify-content:space-between; gap:10px; padding:8px 10px; border-bottom:1px solid #2f4073; font-size:1rem; }
+  #listaRanking li.yo { background:#33497f; border-radius:6px; }
 </style>
 </head>
 
@@ -42,12 +66,51 @@
   <span>Puntos: <b id="puntos">0</b></span>
   <span>Vidas: <b id="vidas">3</b></span>
 </div>
+<div id="cuenta">
+  <span id="cuentaTexto">Conectando…</span>
+  <button id="btnCuenta">👤 Entrar / Crear cuenta</button>
+  <button id="btnRanking">🏆 Ranking</button>
+</div>
 <canvas id="juego" width="640" height="440"></canvas>
 <p id="ayuda"></p>
 <div id="zonaSonido">
   <button id="pausa">⏯ Pausar / seguir</button>
   <button id="probar">🔊 Probar sonidos</button>
   <span id="audioEstado">Cada clic suena un sonido distinto</span>
+</div>
+
+<!-- ============ VENTANA DE CUENTA Y RANKING ============ -->
+<div id="modal" class="oculto">
+  <div id="tarjeta">
+    <button id="cerrarModal" aria-label="Cerrar">✕</button>
+
+    <div id="vistaCuenta">
+      <h2>Rompeladrillos</h2>
+      <p>Para jugar necesitas una cuenta.</p>
+      <div class="pestanas">
+        <button id="pestEntrar" class="activa">Entrar</button>
+        <button id="pestCrear">Crear cuenta</button>
+      </div>
+      <label id="lblUsuario" class="oculto">Usuario (3 a 16 letras, números o _)
+        <input id="campoUsuario" type="text" maxlength="16" autocomplete="username" autocapitalize="none" spellcheck="false">
+      </label>
+      <label>Correo
+        <input id="campoCorreo" type="email" autocomplete="email" autocapitalize="none" spellcheck="false">
+      </label>
+      <label>Contraseña (mínimo 8 caracteres)
+        <input id="campoClave" type="password" autocomplete="current-password">
+      </label>
+      <button id="enviarCuenta">Entrar</button>
+      <p id="mensajeCuenta"></p>
+      <p class="nota">Tu correo solo se usa para tu cuenta y no se muestra a nadie. Tu usuario y tu mejor puntaje sí aparecen en el ranking.</p>
+    </div>
+
+    <div id="vistaRanking" class="oculto">
+      <h2>🏆 Mejores jugadores</h2>
+      <ol id="listaRanking"></ol>
+      <p id="mensajeRanking"></p>
+    </div>
+  </div>
 </div>
 
 <!-- ============ JAVASCRIPT: el cerebro (qué hace el juego) ============ -->
@@ -63,6 +126,7 @@ let nivel = 1;
 let estado = "esperando";   // "esperando", "jugando", "nivelCompleto" o "terminado"
 let cuentaNivel = 0;        // cuenta regresiva de la celebración de nivel
 let bloqueoHasta = 0;       // evita iniciar o reiniciar sin querer al levantar el dedo
+let vistaActual = null;     // qué ventana está abierta: "cuenta", "ranking" o ninguna
 
 // ¿Estamos en un celular o tableta? Entonces cambiamos las instrucciones.
 const esTactil = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
@@ -354,6 +418,8 @@ function dibujarEfectos() {
 // 8) CONTROLES: el juego "escucha" el teclado y el mouse.
 const teclas = {};
 document.addEventListener("keydown", (e) => {
+  if (e.target && ["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;   // escribiendo en el formulario
+  if (vistaActual !== null) return;                                            // hay una ventana abierta
   teclas[e.key] = true;
   if (e.key === " ") { e.preventDefault(); botonEspacio(); }
 });
@@ -387,6 +453,10 @@ document.getElementById("pausa").addEventListener("click", (e) => {
 
 function botonEspacio() {
   activarAudio();
+  if (!jugador) {                                  // sin cuenta no se juega
+    if (vistaActual === null) abrirModal("cuenta");
+    return;
+  }
   if (Date.now() < bloqueoHasta) return;   // pequeña espera tras perder una vida o terminar
   if (estado === "esperando") estado = "jugando";
   else if (estado === "jugando") estado = "esperando";   // pausa
@@ -498,11 +568,12 @@ function actualizar() {
     estado = "nivelCompleto";
     cuentaNivel = 200;
     sonidoNivel();
+    guardarPuntaje();
   }
 
   if (pelota.y > lienzo.height + pelota.radio) {
     vidas--;
-    if (vidas <= 0) { estado = "terminado"; bloqueoHasta = Date.now() + 1200; sonidoPerdiste(); }
+    if (vidas <= 0) { estado = "terminado"; bloqueoHasta = Date.now() + 1200; sonidoPerdiste(); guardarPuntaje(); }
     else { colocarPelota(); estado = "esperando"; bloqueoHasta = Date.now() + 700; }
   }
 }
@@ -651,6 +722,217 @@ function bucle() {
   dibujar();
   requestAnimationFrame(bucle);
 }
+
+// 14) CUENTAS Y RANKING (Supabase)
+// Estos dos datos son públicos: están hechos para ir dentro del juego.
+const SUPABASE_URL = "https://iuzasiuwgztlurnmcdpe.supabase.co";
+const SUPABASE_KEY = "sb_publishable_PhiL_FLSl316sfN0r0qIgQ_PtZ49Qqd";
+
+let supa = null;            // la conexión con Supabase
+let jugador = null;         // quien inició sesión: { id, usuario, mejor }
+let modoRegistro = false;   // ¿el formulario está en "Crear cuenta"?
+
+const modal = document.getElementById("modal");
+const mensajeCuenta = document.getElementById("mensajeCuenta");
+const campoUsuario = document.getElementById("campoUsuario");
+const campoCorreo = document.getElementById("campoCorreo");
+const campoClave = document.getElementById("campoClave");
+const botonEnviar = document.getElementById("enviarCuenta");
+
+function abrirModal(vista) {
+  vistaActual = vista;
+  if (estado === "jugando") estado = "esperando";   // el juego se pausa
+  modal.classList.remove("oculto");
+  // Sin cuenta no se puede cerrar la ventana de entrada: hay que entrar para jugar.
+  document.getElementById("cerrarModal").classList.toggle("oculto", vista === "cuenta" && !jugador);
+  document.getElementById("vistaCuenta").classList.toggle("oculto", vista !== "cuenta");
+  document.getElementById("vistaRanking").classList.toggle("oculto", vista !== "ranking");
+}
+
+function cerrarModal() {
+  if (vistaActual === "cuenta" && !jugador) return;   // sin cuenta, la ventana de entrada no se cierra
+  const eraRanking = vistaActual === "ranking";
+  vistaActual = null;
+  modal.classList.add("oculto");
+  bloqueoHasta = Date.now() + 400;   // para que el toque de cerrar no inicie el juego
+  if (!jugador && eraRanking) abrirModal("cuenta");   // sin cuenta no se puede jugar
+}
+
+function ponerModo(registro) {
+  modoRegistro = registro;
+  document.getElementById("pestEntrar").classList.toggle("activa", !registro);
+  document.getElementById("pestCrear").classList.toggle("activa", registro);
+  document.getElementById("lblUsuario").classList.toggle("oculto", !registro);
+  botonEnviar.textContent = registro ? "Crear mi cuenta" : "Entrar";
+  campoClave.autocomplete = registro ? "new-password" : "current-password";
+  mensajeCuenta.textContent = "";
+}
+
+function actualizarCuentaUI() {
+  const texto = document.getElementById("cuentaTexto");
+  const boton = document.getElementById("btnCuenta");
+  if (!supa) {
+    texto.textContent = "Sin conexión con el servidor";
+    boton.classList.add("oculto");
+    return;
+  }
+  boton.classList.remove("oculto");
+  if (jugador) {
+    texto.textContent = "👤 " + jugador.usuario + " · Mejor: " + jugador.mejor;
+    boton.textContent = "Salir";
+  } else {
+    texto.textContent = "Inicia sesión para jugar";
+    boton.textContent = "👤 Entrar / Crear cuenta";
+  }
+}
+
+function traducirError(err) {
+  const texto = String((err && err.message) || err || "").toLowerCase();
+  if (texto.includes("invalid login")) return "Correo o contraseña incorrectos.";
+  if (texto.includes("already registered")) return "Ese correo ya tiene una cuenta. Prueba en «Entrar».";
+  if (texto.includes("password")) return "La contraseña no es válida. Usa al menos 8 caracteres.";
+  if (texto.includes("email") && texto.includes("invalid")) return "Ese correo no es válido.";
+  if (texto.includes("rate limit") || texto.includes("too many")) return "Demasiados intentos. Espera unos minutos.";
+  if (texto.includes("database error")) return "No se pudo crear la cuenta. Prueba con otro usuario.";
+  if (texto.includes("fetch") || texto.includes("network")) return "No hay conexión con internet.";
+  return "Algo salió mal: " + ((err && err.message) || "error desconocido");
+}
+
+async function cargarJugador(sesion) {
+  let datos = null;
+  try {
+    const { data } = await supa.from("puntajes")
+      .select("usuario, mejor_puntaje")
+      .eq("user_id", sesion.user.id)
+      .maybeSingle();
+    datos = data;
+  } catch (e) { console.warn("No se pudo leer el perfil", e); }
+  jugador = {
+    id: sesion.user.id,
+    usuario: datos ? datos.usuario : "Jugador",
+    mejor: datos ? datos.mejor_puntaje : 0
+  };
+  actualizarCuentaUI();
+  if (vistaActual === "cuenta") cerrarModal();
+}
+
+async function enviarFormulario() {
+  if (!supa) { mensajeCuenta.textContent = "No hay conexión con el servidor."; return; }
+  const usuario = campoUsuario.value.trim();
+  const correo = campoCorreo.value.trim();
+  const clave = campoClave.value;
+  if (!correo || !clave) { mensajeCuenta.textContent = "Escribe tu correo y tu contraseña."; return; }
+  if (modoRegistro) {
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(usuario)) {
+      mensajeCuenta.textContent = "El usuario debe tener de 3 a 16 letras, números o _ (sin espacios).";
+      return;
+    }
+    if (clave.length < 8) { mensajeCuenta.textContent = "La contraseña debe tener al menos 8 caracteres."; return; }
+  }
+  botonEnviar.disabled = true;
+  mensajeCuenta.textContent = "Un momento…";
+  try {
+    if (modoRegistro) {
+      const { data: libre, error: errLibre } = await supa.rpc("usuario_disponible", { p_usuario: usuario });
+      if (errLibre) throw errLibre;
+      if (!libre) { mensajeCuenta.textContent = "Ese usuario ya está ocupado. Elige otro."; return; }
+      const { data, error } = await supa.auth.signUp({ email: correo, password: clave, options: { data: { usuario } } });
+      if (error) throw error;
+      if (!data.session) mensajeCuenta.textContent = "Cuenta creada. Revisa tu correo para confirmarla.";
+    } else {
+      const { error } = await supa.auth.signInWithPassword({ email: correo, password: clave });
+      if (error) throw error;
+    }
+    campoClave.value = "";
+  } catch (err) {
+    mensajeCuenta.textContent = traducirError(err);
+  } finally {
+    botonEnviar.disabled = false;
+  }
+}
+
+async function guardarPuntaje() {
+  if (!supa || !jugador || puntos <= 0) return;
+  const esRecord = puntos > jugador.mejor;
+  try {
+    const { error } = await supa.rpc("guardar_puntaje", { p_puntos: puntos, p_nivel: nivel });
+    if (error) throw error;
+    if (esRecord) {
+      jugador.mejor = puntos;
+      actualizarCuentaUI();
+      textoFlotante("¡NUEVO RÉCORD! 🏆", lienzo.width / 2, 90, "#ffd84d");
+    }
+  } catch (e) { console.warn("No se pudo guardar el puntaje", e); }
+}
+
+async function mostrarRanking() {
+  abrirModal("ranking");
+  const lista = document.getElementById("listaRanking");
+  const aviso = document.getElementById("mensajeRanking");
+  lista.replaceChildren();
+  if (!supa) { aviso.textContent = "El ranking no está disponible ahora."; return; }
+  aviso.textContent = "Cargando…";
+  try {
+    const { data, error } = await supa.from("puntajes")
+      .select("usuario, mejor_puntaje, mejor_nivel")
+      .gt("mejor_puntaje", 0)
+      .order("mejor_puntaje", { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    aviso.textContent = data.length ? "" : "Todavía no hay puntajes. ¡Sé el primero!";
+    data.forEach((fila, i) => {
+      const li = document.createElement("li");
+      const izquierda = document.createElement("span");
+      const derecha = document.createElement("span");
+      const medalla = ["🥇", "🥈", "🥉"][i] || (i + 1) + ".";
+      izquierda.textContent = medalla + " " + fila.usuario;
+      derecha.textContent = fila.mejor_puntaje + " pts · nivel " + fila.mejor_nivel;
+      if (jugador && fila.usuario === jugador.usuario) li.className = "yo";
+      li.append(izquierda, derecha);
+      lista.appendChild(li);
+    });
+  } catch (e) {
+    aviso.textContent = "No se pudo cargar el ranking.";
+  }
+}
+
+function iniciarSupabase() {
+  if (!window.supabase || !window.supabase.createClient) {
+    actualizarCuentaUI();
+    mensajeCuenta.textContent = "No se pudo conectar con el servidor. Revisa tu internet y recarga la página.";
+    abrirModal("cuenta");
+    return;
+  }
+  supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  supa.auth.onAuthStateChange((evento, sesion) => {
+    setTimeout(async () => {
+      if (sesion && sesion.user) {
+        await cargarJugador(sesion);
+      } else {
+        jugador = null;
+        actualizarCuentaUI();
+        ponerModo(false);
+        abrirModal("cuenta");   // sin sesión, siempre se pide la cuenta
+      }
+    }, 0);
+  });
+}
+
+document.getElementById("pestEntrar").addEventListener("click", () => ponerModo(false));
+document.getElementById("pestCrear").addEventListener("click", () => ponerModo(true));
+botonEnviar.addEventListener("click", enviarFormulario);
+[campoUsuario, campoCorreo, campoClave].forEach((campo) => {
+  campo.addEventListener("keydown", (e) => { if (e.key === "Enter") enviarFormulario(); });
+});
+document.getElementById("cerrarModal").addEventListener("click", cerrarModal);
+document.getElementById("btnRanking").addEventListener("click", (e) => { mostrarRanking(); e.currentTarget.blur(); });
+document.getElementById("btnCuenta").addEventListener("click", async (e) => {
+  e.currentTarget.blur();
+  if (jugador) { await supa.auth.signOut(); }
+  else { ponerModo(false); abrirModal("cuenta"); }
+});
+
+iniciarSupabase();
 
 crearLadrillos();
 colocarPelota();
