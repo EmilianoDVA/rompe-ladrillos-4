@@ -3,118 +3,249 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1830">
 <title>Rompeladrillos</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.93.0"></script>
 
-<!-- ============ CSS: la piel del juego (colores, tamaños, posiciones) ============ -->
+<!-- ============ CSS: el diseño (colores, tamaños y cómo se adapta a cada pantalla) ============ -->
 <style>
-  :root { --fondo:#14213d; --marco:#fca311; --texto:#e5e5e5; }
-  html { overscroll-behavior: none; }
+  :root {
+    --fondo:#0e1830; --fondo-2:#14213d; --tarjeta:#1a2a4f; --tarjeta-2:#223565; --borde:#33477d;
+    --acento:#fca311; --acento-texto:#14213d; --texto:#f2f5fc; --suave:#b4c0de; --alerta:#ffd84d;
+    --radio:14px; --sombra:0 10px 28px rgba(0,0,0,.35);
+    --alto:100vh; --reservado:250px; --max-juego:640px;
+    --ancho-juego:min(100%, var(--max-juego), calc((var(--alto) - var(--reservado)) * 1.4545));
+    --fuente-ui:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @supports (height:100dvh) { :root { --alto:100dvh; } }
+  * { box-sizing:border-box; }
+  html { overscroll-behavior:none; -webkit-text-size-adjust:100%; background:var(--fondo); }
   body {
-    margin:0; padding:10px; box-sizing:border-box; min-height:100vh;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
-    background:var(--fondo); color:var(--texto);
-    font-family: Georgia, "Times New Roman", serif;
-    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
-    touch-action: manipulation;
+    margin:0; min-height:var(--alto); color:var(--texto); font-family:var(--fuente-ui);
+    background:radial-gradient(1200px 600px at 50% -10%, #223a73 0%, var(--fondo-2) 45%, var(--fondo) 100%) fixed;
+    padding:max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; touch-action:manipulation;
   }
-  h1 { margin:0; font-size:clamp(1.5rem, 6vw, 2rem); letter-spacing:1px; }
-  #info { font-size:clamp(0.95rem, 3.6vw, 1.1rem); display:flex; flex-wrap:wrap; justify-content:center; gap:8px 22px; }
-  canvas {
-    background:#0b132b; border:4px solid var(--marco); border-radius:6px;
-    width:min(calc(96vw - 8px), 632px, calc(113vh - 8px)); height:auto; aspect-ratio:640 / 440;
-    touch-action:none; display:block;
-  }
-  p { margin:0; opacity:.8; text-align:center; font-size:clamp(0.85rem, 3.4vw, 1rem); }
-  #zonaSonido { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:10px 12px; }
-  #zonaSonido button {
-    font-family:inherit; font-size:1rem; padding:10px 16px; cursor:pointer;
-    background:var(--marco); color:#14213d; border:none; border-radius:8px; font-weight:bold;
-  }
-  #audioEstado { font-size:0.85rem; opacity:.8; }
-
-  /* --- Cuentas y ranking --- */
-  input { -webkit-user-select:text; user-select:text; }
   .oculto { display:none !important; }
-  #cuenta { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 10px; font-size:clamp(0.85rem, 3.4vw, 1rem); }
-  #cuenta button { font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-weight:bold; font-size:0.9rem; padding:7px 12px; background:#2b3a67; color:var(--texto); }
-  #modal { position:fixed; inset:0; background:rgba(5,10,25,.82); display:flex; align-items:center; justify-content:center; padding:14px; z-index:50; }
-  #tarjeta { position:relative; width:min(420px, 100%); max-height:92vh; overflow:auto; background:#1b2a4e; border:3px solid var(--marco); border-radius:12px; padding:22px 20px; box-sizing:border-box; }
-  #tarjeta h2 { margin:0 0 12px; text-align:center; font-size:1.4rem; }
-  #tarjeta button { font-family:inherit; cursor:pointer; border:none; border-radius:8px; font-weight:bold; }
-  #cerrarModal { position:absolute; top:8px; right:10px; background:none; color:var(--texto); font-size:1.3rem; padding:4px 8px; }
-  .pestanas { display:flex; gap:8px; margin-bottom:12px; }
-  .pestanas button { flex:1; padding:9px; background:#2b3a67; color:var(--texto); }
-  .pestanas button.activa { background:var(--marco); color:#14213d; }
-  #tarjeta label { display:block; margin:10px 0 0; font-size:.95rem; }
-  #tarjeta input { display:block; width:100%; box-sizing:border-box; margin-top:4px; padding:11px; font-size:16px; border-radius:8px; border:2px solid #3b4d80; background:#0f1a36; color:var(--texto); font-family:inherit; }
-  #enviarCuenta { width:100%; margin-top:16px; padding:12px; font-size:1.05rem; background:var(--marco); color:#14213d; }
-  #mensajeCuenta, #mensajeRanking { min-height:1.2em; margin:10px 0 0; font-size:.92rem; color:#ffd84d; opacity:1; }
-  .nota { font-size:.8rem; opacity:.75; margin-top:12px; }
-  #tarjeta .enlace { display:block; margin:12px auto 0; background:none; color:var(--texto); text-decoration:underline; font-weight:normal; font-size:.9rem; padding:6px; }
-  #listaRanking { list-style:none; margin:0; padding:0; }
-  #listaRanking li { display:flex; justify-content:space-between; gap:10px; padding:8px 10px; border-bottom:1px solid #2f4073; font-size:1rem; }
-  #listaRanking li.yo { background:#33497f; border-radius:6px; }
+  :focus-visible { outline:3px solid var(--alerta); outline-offset:2px; }
+
+  #app { width:100%; max-width:1180px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+
+  /* --- Encabezado y cuenta --- */
+  #encabezado { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 16px; }
+  h1 { margin:0; font-family:Georgia, "Times New Roman", serif; font-size:clamp(1.35rem, 5.5vw, 2rem); letter-spacing:.5px; }
+  h1 .marca { color:var(--acento); }
+  #cuenta { display:flex; align-items:center; gap:10px; background:var(--tarjeta); border:1px solid var(--borde); border-radius:999px; padding:5px; }
+  #cuentaAvatar { width:36px; height:36px; flex:none; border-radius:50%; background:var(--acento); color:var(--acento-texto); display:grid; place-items:center; font-weight:800; }
+  #cuentaDatos { display:flex; flex-direction:column; line-height:1.15; min-width:0; }
+  #cuentaNombre { font-size:.95rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px; }
+  #cuentaMejor { font-size:.75rem; color:var(--suave); }
+
+  /* --- Botones --- */
+  .btn { font:inherit; font-weight:700; min-height:48px; padding:10px 14px; border:1px solid var(--borde); border-radius:12px; background:var(--tarjeta-2); color:var(--texto); cursor:pointer; transition:transform .08s, filter .15s; }
+  .btn.primario { background:var(--acento); border-color:var(--acento); color:var(--acento-texto); }
+  .btn.chico { min-height:36px; padding:6px 14px; font-size:.85rem; border-radius:999px; }
+  .btn.grande { width:100%; min-height:52px; font-size:1.05rem; }
+  .btn:active { transform:scale(.97); }
+  .btn:disabled { opacity:.6; cursor:wait; }
+  @media (hover:hover) { .btn:hover { filter:brightness(1.12); } }
+
+  /* --- Zona de juego --- */
+  #zonaJuego { display:grid; grid-template-columns:minmax(0, 1fr); gap:16px; }
+  #colJuego { display:flex; flex-direction:column; align-items:center; gap:10px; min-width:0; }
+  #hud { width:var(--ancho-juego); display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  .dato { background:var(--tarjeta); border:1px solid var(--borde); border-radius:12px; padding:8px 10px; text-align:center; display:flex; flex-direction:column; gap:2px; }
+  .dato .etiqueta { font-size:.68rem; letter-spacing:.12em; text-transform:uppercase; color:var(--suave); }
+  .dato b { font-size:clamp(1.15rem, 4.5vw, 1.6rem); font-variant-numeric:tabular-nums; }
+  canvas {
+    display:block; box-sizing:content-box; width:calc(var(--ancho-juego) - 8px); height:auto; aspect-ratio:640 / 440;
+    background:#0b132b; border:4px solid var(--acento); border-radius:12px; box-shadow:var(--sombra); touch-action:none;
+  }
+  #controles { width:var(--ancho-juego); display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
+  #ayuda { width:var(--ancho-juego); margin:0; text-align:center; color:var(--suave); font-size:.85rem; }
+
+  /* --- Panel lateral: ranking y consejos --- */
+  #panelLateral { display:grid; gap:14px; }
+  .solo-grande { display:none; }
+  #btnRanking { display:none; }
+  .panel { background:var(--tarjeta); border:1px solid var(--borde); border-radius:var(--radio); padding:14px 16px; box-shadow:var(--sombra); }
+  .panel h2 { margin:0 0 10px; font-size:1.05rem; }
+  .lista-ranking { list-style:none; margin:0; padding:0; }
+  .lista-ranking li { display:grid; grid-template-columns:34px 1fr auto; align-items:center; gap:8px; padding:8px; border-bottom:1px solid rgba(255,255,255,.07); }
+  .lista-ranking li:last-child { border-bottom:none; }
+  .lista-ranking .pos { text-align:center; font-weight:800; color:var(--suave); }
+  .lista-ranking .nombre { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+  .lista-ranking .pts { font-variant-numeric:tabular-nums; color:var(--alerta); font-weight:700; font-size:.9rem; }
+  .lista-ranking li.yo { background:rgba(252,163,17,.22); border-radius:10px; box-shadow:inset 3px 0 0 var(--acento); }
+  .aviso { margin:8px 0 0; color:var(--suave); font-size:.88rem; min-height:1.2em; }
+  .consejos { margin:0; padding-left:18px; color:var(--suave); font-size:.92rem; line-height:1.55; }
+
+  /* --- Ventana de cuenta y ranking --- */
+  #modal { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:14px; background:rgba(6,11,26,.8); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); }
+  #tarjeta { position:relative; width:min(440px, 100%); max-height:92vh; max-height:92dvh; overflow:auto; background:var(--tarjeta); border:1px solid var(--borde); border-radius:18px; padding:22px 20px 18px; box-shadow:var(--sombra); }
+  #tarjeta h2 { margin:0; text-align:center; font-family:Georgia, "Times New Roman", serif; font-size:1.5rem; }
+  .subtitulo { margin:6px 0 14px; text-align:center; color:var(--suave); }
+  #cerrarModal { position:absolute; top:8px; right:8px; width:40px; height:40px; border:none; border-radius:50%; background:transparent; color:var(--texto); font-size:1.2rem; cursor:pointer; }
+  .pestanas { display:grid; grid-template-columns:1fr 1fr; gap:6px; background:var(--fondo); padding:4px; border-radius:12px; margin-bottom:6px; }
+  .pestanas button { font:inherit; font-weight:700; min-height:42px; border:none; border-radius:9px; background:transparent; color:var(--suave); cursor:pointer; }
+  .pestanas button.activa { background:var(--acento); color:var(--acento-texto); }
+  .grupo { margin-top:12px; }
+  .grupo label { display:block; font-weight:600; font-size:.92rem; margin-bottom:5px; }
+  .grupo small { display:block; margin-top:5px; color:var(--suave); font-size:.78rem; line-height:1.35; }
+  #tarjeta input { width:100%; min-height:48px; padding:10px 12px; font:inherit; font-size:16px; color:var(--texto); background:var(--fondo); border:2px solid var(--borde); border-radius:10px; -webkit-user-select:text; user-select:text; }
+  #tarjeta input:focus { outline:none; border-color:var(--acento); }
+  .campo-clave { position:relative; }
+  .campo-clave input { padding-right:92px; }
+  #verClave { position:absolute; top:4px; right:4px; min-height:40px; padding:0 12px; font:inherit; font-size:.85rem; font-weight:700; border:none; border-radius:8px; background:var(--tarjeta-2); color:var(--texto); cursor:pointer; }
+  #enviarCuenta { margin-top:16px; }
+  #mensajeCuenta { min-height:1.3em; margin:10px 0 0; color:var(--alerta); font-size:.92rem; text-align:center; }
+  .nota { margin:10px 0 0; color:var(--suave); font-size:.78rem; line-height:1.4; text-align:center; }
+
+  /* --- iPad vertical y pantallas medianas --- */
+  @media (min-width:700px) {
+    :root { --max-juego:700px; --reservado:270px; }
+    #panelLateral { grid-template-columns:1fr 1fr; align-items:start; width:100%; max-width:var(--max-juego); margin:0 auto; }
+    .solo-grande { display:block; }
+  }
+  /* --- iPad horizontal y computadora: juego a la izquierda, ranking a la derecha --- */
+  @media (min-width:980px) {
+    :root { --max-juego:780px; }
+    #zonaJuego { grid-template-columns:minmax(0, 1fr) 330px; align-items:start; }
+    #panelLateral { grid-template-columns:1fr; max-width:none; margin:0; }
+  }
+  /* --- Celular: ventana de cuenta pegada abajo, como en las apps --- */
+  @media (max-width:560px) {
+    #encabezado { flex-direction:column; align-items:stretch; text-align:center; }
+    #cuenta { justify-content:space-between; border-radius:16px; }
+    #cuentaNombre { max-width:46vw; }
+    #modal { align-items:flex-end; padding:0; }
+    #tarjeta { width:100%; border-radius:20px 20px 0 0; padding-bottom:calc(18px + env(safe-area-inset-bottom)); }
+  }
+  /* --- Celular acostado: datos a la izquierda, juego al centro y botones a la derecha --- */
+  @media (max-height:520px) and (orientation:landscape) {
+    :root { --max-juego:640px; --ancho-juego:min(calc(100vw - 250px), 640px, calc((var(--alto) - 96px) * 1.4545)); }
+    #app { gap:6px; }
+    #zonaJuego { grid-template-columns:minmax(0, 1fr); }
+    #panelLateral { display:none; }
+    #btnRanking { display:block; }
+    #encabezado { flex-direction:row; flex-wrap:nowrap; text-align:left; }
+    h1 { font-size:1.25rem; }
+    #cuenta { border-radius:999px; padding:3px; }
+    #cuentaAvatar { width:30px; height:30px; }
+    #colJuego { display:grid; grid-template-columns:104px auto 104px; justify-content:center; align-items:center; gap:10px; }
+    #hud { grid-column:1; grid-row:1; width:auto; grid-template-columns:1fr; gap:6px; }
+    canvas { grid-column:2; grid-row:1; }
+    #controles { grid-column:3; grid-row:1; width:auto; grid-template-columns:1fr; gap:6px; }
+    #ayuda { display:none; }
+    .btn { min-height:40px; padding:6px 10px; font-size:.9rem; }
+    .dato { padding:5px 8px; }
+    .dato b { font-size:1.15rem; }
+  }
 </style>
 </head>
 
 <body>
 <!-- ============ HTML: el esqueleto (qué hay en la página) ============ -->
-<h1>Rompeladrillos</h1>
-<div id="info">
-  <span>Nivel: <b id="nivelTexto">1</b></span>
-  <span>Puntos: <b id="puntos">0</b></span>
-  <span>Vidas: <b id="vidas">3</b></span>
-</div>
-<div id="cuenta">
-  <span id="cuentaTexto">Conectando…</span>
-  <button id="btnCuenta">👤 Entrar / Crear cuenta</button>
-  <button id="btnRanking">🏆 Ranking</button>
-</div>
-<canvas id="juego" width="640" height="440"></canvas>
-<p id="ayuda"></p>
-<div id="zonaSonido">
-  <button id="pausa">⏯ Pausar / seguir</button>
-  <button id="probar">🔊 Probar sonidos</button>
-  <span id="audioEstado">Cada clic suena un sonido distinto</span>
+<div id="app">
+
+  <header id="encabezado">
+    <h1><span class="marca">●</span> Rompeladrillos</h1>
+    <div id="cuenta">
+      <div id="cuentaAvatar" aria-hidden="true">?</div>
+      <div id="cuentaDatos">
+        <strong id="cuentaNombre">Conectando…</strong>
+        <small id="cuentaMejor"></small>
+      </div>
+      <button id="btnCuenta" class="btn chico">Entrar</button>
+    </div>
+  </header>
+
+  <main id="zonaJuego">
+    <section id="colJuego">
+      <div id="hud">
+        <div class="dato"><span class="etiqueta">Nivel</span><b id="nivelTexto">1</b></div>
+        <div class="dato"><span class="etiqueta">Puntos</span><b id="puntos">0</b></div>
+        <div class="dato"><span class="etiqueta">Vidas</span><b id="vidas">❤️❤️❤️</b></div>
+      </div>
+
+      <canvas id="juego" width="640" height="440" aria-label="Campo de juego"></canvas>
+
+      <div id="controles">
+        <button id="pausa" class="btn primario">⏯ Pausa</button>
+        <button id="btnRanking" class="btn">🏆 Ranking</button>
+        <button id="btnSonido" class="btn">🔊 Sonido</button>
+      </div>
+      <p id="ayuda"></p>
+    </section>
+
+    <aside id="panelLateral">
+      <section class="panel">
+        <h2>🏆 Mejores jugadores</h2>
+        <ol id="listaPanel" class="lista-ranking"></ol>
+        <p id="mensajePanel" class="aviso"></p>
+      </section>
+      <section class="panel solo-grande">
+        <h2>Cómo se juega</h2>
+        <ul class="consejos">
+          <li>Mueve la barra con el mouse o con ← →.</li>
+          <li>Rompe todos los círculos de un color y ganas +50.</li>
+          <li>Al terminar un nivel ganas un bonus.</li>
+          <li>Cada nivel es más rápido y más difícil.</li>
+        </ul>
+      </section>
+    </aside>
+  </main>
 </div>
 
 <!-- ============ VENTANA DE CUENTA Y RANKING ============ -->
-<div id="modal" class="oculto">
+<div id="modal" class="oculto" role="dialog" aria-modal="true">
   <div id="tarjeta">
     <button id="cerrarModal" aria-label="Cerrar">✕</button>
 
     <div id="vistaCuenta">
       <h2>Rompeladrillos</h2>
-      <p>Para jugar necesitas una cuenta.</p>
+      <p class="subtitulo">Para jugar necesitas una cuenta.</p>
       <div class="pestanas">
         <button id="pestEntrar" class="activa">Entrar</button>
         <button id="pestCrear">Crear cuenta</button>
       </div>
-      <label id="lblUsuario" class="oculto">Usuario (3 a 16 letras, números o _)
+
+      <div id="lblUsuario" class="grupo oculto">
+        <label for="campoUsuario">Apodo</label>
         <input id="campoUsuario" type="text" maxlength="16" autocomplete="username" autocapitalize="none" spellcheck="false">
-      </label>
-      <label>Correo
+        <small>De 3 a 16 letras, números o _. Se muestra en el ranking: no uses tu nombre real ni tu correo.</small>
+      </div>
+
+      <div class="grupo">
+        <label for="campoCorreo">Correo</label>
         <input id="campoCorreo" type="email" autocomplete="email" autocapitalize="none" spellcheck="false">
-      </label>
-      <label>Contraseña (mínimo 8 caracteres)
-        <input id="campoClave" type="password" autocomplete="current-password">
-      </label>
-      <button id="enviarCuenta">Entrar</button>
-      <p id="mensajeCuenta"></p>
-      <p class="nota">Tu correo solo se usa para tu cuenta y no se muestra a nadie. Tu usuario y tu mejor puntaje sí aparecen en el ranking.</p>
+      </div>
+
+      <div class="grupo">
+        <label for="campoClave">Contraseña</label>
+        <div class="campo-clave">
+          <input id="campoClave" type="password" autocomplete="current-password">
+          <button type="button" id="verClave" aria-label="Mostrar u ocultar la contraseña">Mostrar</button>
+        </div>
+        <small>Mínimo 8 caracteres.</small>
+      </div>
+
+      <button id="enviarCuenta" class="btn primario grande">Entrar</button>
+      <p id="mensajeCuenta" role="alert"></p>
+      <p class="nota">Tu correo solo se usa para tu cuenta y no se muestra a nadie. Tu apodo y tu mejor puntaje sí aparecen en el ranking.</p>
     </div>
 
     <div id="vistaRanking" class="oculto">
       <h2>🏆 Mejores jugadores</h2>
-      <ol id="listaRanking"></ol>
-      <p id="mensajeRanking"></p>
+      <ol id="listaRanking" class="lista-ranking"></ol>
+      <p id="mensajeRanking" class="aviso"></p>
     </div>
   </div>
 </div>
 
 <!-- ============ JAVASCRIPT: el cerebro (qué hace el juego) ============ -->
 <script>
+
 // 1) PREPARAR EL LIENZO: "canvas" es una hoja en blanco donde dibujamos.
 const lienzo = document.getElementById("juego");
 const pincel = lienzo.getContext("2d");
@@ -218,7 +349,7 @@ function nota(frecuencia, inicio, duracion, tipo, fuerza) {
 
 // 6a) CLINK DE CRISTAL: tres notas sonando juntas que se apagan poco a poco.
 function sonidoClink() {
-  if (!audio) return;
+  if (!audio || !sonidoActivo) return;
   const t = audio.currentTime;
   const notas = [ [1400, 0.5], [3250, 0.3], [5950, 0.15] ];   // [frecuencia, fuerza]
   notas.forEach(([frecuencia, fuerza]) => {
@@ -237,7 +368,7 @@ function sonidoClink() {
 
 // 6b) TRAMPOLÍN: un "boing" cuya nota sube rápido y luego baja y rebota como resorte.
 function sonidoTrampolin() {
-  if (!audio) return;
+  if (!audio || !sonidoActivo) return;
   const t = audio.currentTime;
   const osc = audio.createOscillator();
   const volumen = audio.createGain();
@@ -257,7 +388,7 @@ function sonidoTrampolin() {
 
 // 6c) PERDISTE: el "¡aaah!" de una multitud decepcionada. Varias voces graves que bajan de tono.
 function sonidoPerdiste() {
-  if (!audio) return;
+  if (!audio || !sonidoActivo) return;
   const t = audio.currentTime;
   const master = audio.createGain();
   master.gain.setValueAtTime(0.0001, t);
@@ -296,7 +427,7 @@ function sonidoPerdiste() {
 
 // 6d) CELEBRACIÓN DE COLOR: tres notas brillantes que suben, como una chispa.
 function sonidoColor() {
-  if (!audio) return;
+  if (!audio || !sonidoActivo) return;
   nota(1047, 0.00, 0.30, "sine", 0.35);
   nota(1319, 0.07, 0.30, "sine", 0.35);
   nota(1568, 0.14, 0.45, "sine", 0.35);
@@ -305,7 +436,7 @@ function sonidoColor() {
 
 // 6e) NIVEL COMPLETO: una fanfarria de trompetas y un acorde final.
 function sonidoNivel() {
-  if (!audio) return;
+  if (!audio || !sonidoActivo) return;
   [523, 659, 784, 1047].forEach((frecuencia, i) => {
     nota(frecuencia, i * 0.16, 0.28, "square", 0.10);
     nota(frecuencia, i * 0.16, 0.28, "triangle", 0.25);
@@ -317,30 +448,23 @@ function sonidoNivel() {
   nota(2093, 0.75, 1.1, "sine", 0.15);
 }
 
-// Botón de prueba: cada clic suena un sonido distinto, sin necesidad de jugar.
-const pruebas = [
-  ["clink de cristal", sonidoClink],
-  ["trampolín", sonidoTrampolin],
-  ["color completo", sonidoColor],
-  ["nivel completo", sonidoNivel],
-  ["perdiste", sonidoPerdiste]
-];
-let turnoPrueba = 0;
-const botonProbar = document.getElementById("probar");
-const textoAudio = document.getElementById("audioEstado");
-botonProbar.addEventListener("click", async () => {
-  try {
-    activarAudio();
-    await audio.resume();
-    const [nombre, sonido] = pruebas[turnoPrueba];
-    sonido();
-    textoAudio.textContent = "Sonó: " + nombre + " (audio " + audio.state + ")";
-    turnoPrueba = (turnoPrueba + 1) % pruebas.length;
-  } catch (error) {
-    textoAudio.textContent = "Error de audio: " + error.message;
-  }
-  botonProbar.blur();   // así la barra espaciadora no vuelve a presionar este botón
+// Botón de sonido: activa o silencia todos los sonidos (y recuerda tu elección).
+let sonidoActivo = true;
+try { sonidoActivo = localStorage.getItem("rl_sonido") !== "no"; } catch (e) { /* sin memoria: no pasa nada */ }
+const botonSonido = document.getElementById("btnSonido");
+function pintarBotonSonido() {
+  botonSonido.textContent = sonidoActivo ? "🔊 Sonido" : "🔇 Silencio";
+  botonSonido.setAttribute("aria-pressed", String(!sonidoActivo));
+}
+botonSonido.addEventListener("click", (e) => {
+  sonidoActivo = !sonidoActivo;
+  try { localStorage.setItem("rl_sonido", sonidoActivo ? "si" : "no"); } catch (err) { /* sin memoria */ }
+  pintarBotonSonido();
+  activarAudio();
+  if (sonidoActivo) sonidoClink();   // un "clink" para confirmar que ya suena
+  e.currentTarget.blur();
 });
+pintarBotonSonido();
 
 // 7) EFECTOS DE CELEBRACIÓN: chispas, confeti y letreros que flotan.
 let particulas = [];
@@ -482,7 +606,7 @@ function colocarPelota() {
 function actualizarMarcador() {
   document.getElementById("nivelTexto").textContent = nivel;
   document.getElementById("puntos").textContent = puntos;
-  document.getElementById("vidas").textContent = vidas;
+  document.getElementById("vidas").textContent = "❤️".repeat(Math.max(vidas, 0)) || "💔";
 }
 
 // 10) ACTUALIZAR: se ejecuta ~60 veces por segundo y mueve todo.
@@ -769,20 +893,28 @@ function ponerModo(registro) {
 }
 
 function actualizarCuentaUI() {
-  const texto = document.getElementById("cuentaTexto");
+  const avatar = document.getElementById("cuentaAvatar");
+  const nombre = document.getElementById("cuentaNombre");
+  const mejor = document.getElementById("cuentaMejor");
   const boton = document.getElementById("btnCuenta");
   if (!supa) {
-    texto.textContent = "Sin conexión con el servidor";
+    avatar.textContent = "!";
+    nombre.textContent = "Sin conexión";
+    mejor.textContent = "Recarga la página";
     boton.classList.add("oculto");
     return;
   }
   boton.classList.remove("oculto");
   if (jugador) {
-    texto.textContent = "👤 " + jugador.usuario + " · Mejor: " + jugador.mejor;
+    avatar.textContent = jugador.usuario.charAt(0).toUpperCase();
+    nombre.textContent = jugador.usuario;
+    mejor.textContent = "Mejor: " + jugador.mejor + " pts";
     boton.textContent = "Salir";
   } else {
-    texto.textContent = "Inicia sesión para jugar";
-    boton.textContent = "👤 Entrar / Crear cuenta";
+    avatar.textContent = "?";
+    nombre.textContent = "Sin sesión";
+    mejor.textContent = "Inicia sesión para jugar";
+    boton.textContent = "Entrar";
   }
 }
 
@@ -793,7 +925,7 @@ function traducirError(err) {
   if (texto.includes("password")) return "La contraseña no es válida. Usa al menos 8 caracteres.";
   if (texto.includes("email") && texto.includes("invalid")) return "Ese correo no es válido.";
   if (texto.includes("rate limit") || texto.includes("too many")) return "Demasiados intentos. Espera unos minutos.";
-  if (texto.includes("database error")) return "No se pudo crear la cuenta. Prueba con otro usuario.";
+  if (texto.includes("database error")) return "No se pudo crear la cuenta. Prueba con otro apodo.";
   if (texto.includes("fetch") || texto.includes("network")) return "No hay conexión con internet.";
   return "Algo salió mal: " + ((err && err.message) || "error desconocido");
 }
@@ -813,6 +945,7 @@ async function cargarJugador(sesion) {
     mejor: datos ? datos.mejor_puntaje : 0
   };
   actualizarCuentaUI();
+  refrescarRankingPanel();
   if (vistaActual === "cuenta") cerrarModal();
 }
 
@@ -824,7 +957,7 @@ async function enviarFormulario() {
   if (!correo || !clave) { mensajeCuenta.textContent = "Escribe tu correo y tu contraseña."; return; }
   if (modoRegistro) {
     if (!/^[A-Za-z0-9_]{3,16}$/.test(usuario)) {
-      mensajeCuenta.textContent = "El usuario debe tener de 3 a 16 letras, números o _ (sin espacios).";
+      mensajeCuenta.textContent = "El apodo debe tener de 3 a 16 letras, números o _ (sin espacios).";
       return;
     }
     if (clave.length < 8) { mensajeCuenta.textContent = "La contraseña debe tener al menos 8 caracteres."; return; }
@@ -835,7 +968,7 @@ async function enviarFormulario() {
     if (modoRegistro) {
       const { data: libre, error: errLibre } = await supa.rpc("usuario_disponible", { p_usuario: usuario });
       if (errLibre) throw errLibre;
-      if (!libre) { mensajeCuenta.textContent = "Ese usuario ya está ocupado. Elige otro."; return; }
+      if (!libre) { mensajeCuenta.textContent = "Ese apodo ya está ocupado. Elige otro."; return; }
       const { data, error } = await supa.auth.signUp({ email: correo, password: clave, options: { data: { usuario } } });
       if (error) throw error;
       if (!data.session) mensajeCuenta.textContent = "Cuenta creada. Revisa tu correo para confirmarla.";
@@ -857,6 +990,7 @@ async function guardarPuntaje() {
   try {
     const { error } = await supa.rpc("guardar_puntaje", { p_puntos: puntos, p_nivel: nivel });
     if (error) throw error;
+    refrescarRankingPanel();
     if (esRecord) {
       jugador.mejor = puntos;
       actualizarCuentaUI();
@@ -865,10 +999,23 @@ async function guardarPuntaje() {
   } catch (e) { console.warn("No se pudo guardar el puntaje", e); }
 }
 
-async function mostrarRanking() {
-  abrirModal("ranking");
-  const lista = document.getElementById("listaRanking");
-  const aviso = document.getElementById("mensajeRanking");
+function filaRanking(fila, i) {
+  const li = document.createElement("li");
+  const pos = document.createElement("span");
+  const nombre = document.createElement("span");
+  const pts = document.createElement("span");
+  pos.className = "pos";
+  nombre.className = "nombre";
+  pts.className = "pts";
+  pos.textContent = ["🥇", "🥈", "🥉"][i] || String(i + 1);
+  nombre.textContent = fila.usuario;
+  pts.textContent = fila.mejor_puntaje + " pts · nv " + fila.mejor_nivel;
+  if (jugador && fila.usuario === jugador.usuario) li.className = "yo";
+  li.append(pos, nombre, pts);
+  return li;
+}
+
+async function cargarRanking(lista, aviso) {
   lista.replaceChildren();
   if (!supa) { aviso.textContent = "El ranking no está disponible ahora."; return; }
   aviso.textContent = "Cargando…";
@@ -880,30 +1027,34 @@ async function mostrarRanking() {
       .limit(10);
     if (error) throw error;
     aviso.textContent = data.length ? "" : "Todavía no hay puntajes. ¡Sé el primero!";
-    data.forEach((fila, i) => {
-      const li = document.createElement("li");
-      const izquierda = document.createElement("span");
-      const derecha = document.createElement("span");
-      const medalla = ["🥇", "🥈", "🥉"][i] || (i + 1) + ".";
-      izquierda.textContent = medalla + " " + fila.usuario;
-      derecha.textContent = fila.mejor_puntaje + " pts · nivel " + fila.mejor_nivel;
-      if (jugador && fila.usuario === jugador.usuario) li.className = "yo";
-      li.append(izquierda, derecha);
-      lista.appendChild(li);
-    });
+    data.forEach((fila, i) => lista.appendChild(filaRanking(fila, i)));
   } catch (e) {
     aviso.textContent = "No se pudo cargar el ranking.";
   }
+}
+
+// El panel de la derecha (computadora y iPad) se mantiene al día.
+function refrescarRankingPanel() {
+  cargarRanking(document.getElementById("listaPanel"), document.getElementById("mensajePanel"));
+}
+
+// La ventana del ranking (celular).
+async function mostrarRanking() {
+  abrirModal("ranking");
+  await cargarRanking(document.getElementById("listaRanking"), document.getElementById("mensajeRanking"));
 }
 
 function iniciarSupabase() {
   if (!window.supabase || !window.supabase.createClient) {
     actualizarCuentaUI();
     mensajeCuenta.textContent = "No se pudo conectar con el servidor. Revisa tu internet y recarga la página.";
+    refrescarRankingPanel();
     abrirModal("cuenta");
     return;
   }
   supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  refrescarRankingPanel();
+  setInterval(() => { if (!document.hidden) refrescarRankingPanel(); }, 60000);
   supa.auth.onAuthStateChange((evento, sesion) => {
     setTimeout(async () => {
       if (sesion && sesion.user) {
@@ -925,6 +1076,11 @@ botonEnviar.addEventListener("click", enviarFormulario);
   campo.addEventListener("keydown", (e) => { if (e.key === "Enter") enviarFormulario(); });
 });
 document.getElementById("cerrarModal").addEventListener("click", cerrarModal);
+document.getElementById("verClave").addEventListener("click", (e) => {
+  const oculta = campoClave.type === "password";
+  campoClave.type = oculta ? "text" : "password";
+  e.currentTarget.textContent = oculta ? "Ocultar" : "Mostrar";
+});
 document.getElementById("btnRanking").addEventListener("click", (e) => { mostrarRanking(); e.currentTarget.blur(); });
 document.getElementById("btnCuenta").addEventListener("click", async (e) => {
   e.currentTarget.blur();
@@ -938,13 +1094,10 @@ crearLadrillos();
 colocarPelota();
 bucle();
 
-// ===== PARCHE DE AUDIO: despierta el sonido con cualquier clic o tecla =====
+// ===== Despierta el sonido con cualquier clic, tecla o toque =====
 document.addEventListener("pointerdown", activarAudio, true);
 document.addEventListener("keydown", activarAudio, true);
 document.addEventListener("touchend", activarAudio, true);
-setInterval(() => {
-  document.title = (audio && audio.state === "running" ? "🔊 " : "🔇 ") + "Rompeladrillos";
-}, 500);
 </script>
 </body>
 </html>
